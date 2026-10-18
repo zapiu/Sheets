@@ -1,0 +1,55 @@
+name: Check GridCraft upstream
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: gridcraft-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Propose upstream changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/storytold/gridcraft.git
+          git fetch upstream main
+          git fetch origin main
+
+          if git merge-base --is-ancestor upstream/main origin/main; then
+            echo 'ZAPIU Sheets already includes upstream main.'
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin upstream-sync >/dev/null; then
+            git fetch origin upstream-sync
+            git switch -C upstream-sync origin/upstream-sync
+          else
+            git switch -C upstream-sync origin/main
+          fi
+
+          git merge --no-edit origin/main
+          git merge --no-edit upstream/main
+          git push --set-upstream origin upstream-sync
+
+          if [ -z "$(gh pr list --head upstream-sync --base main --state open --json number --jq '.[0].number')" ]; then
+            gh pr create \
+              --base main \
+              --head upstream-sync \
+              --title 'Sync GridCraft upstream' \
+              --body 'Daily upstream update proposal. Review the diff and CI before merging into ZAPIU Sheets.'
+          fi
